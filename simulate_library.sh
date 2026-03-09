@@ -3,8 +3,6 @@
 #SBATCH --ntasks=1 --cpus-per-task=8
 #SBATCH --time=12:00:00
 #SBATCH --job-name=gc_map
-***REMOVED***
-***REMOVED***
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 #this script will take as input a mapped bam file and will simulate and artificial library based on the main metrics of that file. 

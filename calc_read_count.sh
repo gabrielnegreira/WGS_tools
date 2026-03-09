@@ -4,8 +4,6 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=01:00:00
 #SBATCH --job-name=count_reads
-***REMOVED***
-***REMOVED***
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 #this is a simple bash script that will compute binned read counts from a given bam file.

@@ -3,8 +3,6 @@
 #SBATCH --ntasks=1 --cpus-per-task=8
 #SBATCH --time=12:00:00
 #SBATCH --job-name=gc_map
-***REMOVED***
-***REMOVED***
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 #this script will take a reference genome (fasta file) and will compute both the gc content and the mappability of specified bins
