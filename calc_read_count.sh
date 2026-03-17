@@ -42,7 +42,7 @@ Usage: sbatch calc_read_count.sh [options]
 
 Options:
   -b <bam file>           the path to the bam file (required)
-  -s <bin size>           the size of the genomic bins in basepairs
+  -s <bin size>           the size of the genomic bins in basepairs (required)
   -r <reference genome>   path to reference genome file in fasta format (required)
   -o <output_dir>         Output directory (required)
   -l <file list>          a tsv file containing a list of files, one per line. Meant to be used with slurm arrays.
@@ -135,6 +135,13 @@ echo "$temp_dir"
 bedtools makewindows -g "${REF_GENOME}.fai" -w "$BIN_SIZE" > "${temp_dir}/genome_${BIN_SIZE}bp_bins.bed"
 bins_bed="${temp_dir}/genome_${BIN_SIZE}bp_bins.bed"
 
+##compute gc content
+echo computing gc content of each bin...
+bedtools nuc -fi "$REF_GENOME" -bed "$bins_bed" \
+  | tail -n +2 \
+  | cut -f1-3,5 \
+  > "${temp_dir}/${sample}.bins_gc.bed"
+
 ##count reads
 printf "Counting reads for sample %s with bin size %s bp based on file:\n\n%s\n" "$sample" "$BIN_SIZE" "$BAM_FILE"
 
@@ -144,7 +151,9 @@ printf "Counting reads for sample %s with bin size %s bp based on file:\n\n%s\n"
   | samtools markdup -r -@ "${threads}" - - \
   | samtools view -b -F 4 -q 30 -@ "${threads}" - \
   | bedtools coverage -a "${bins_bed}" -b stdin -counts -sorted -g "${REF_GENOME}.fai" \
-    > "${OUTPUTS_DIR}/${sample}.counts.bed"
+  | paste "${temp_dir}/${sample}.bins_gc.bed" - \
+  | awk 'BEGIN{OFS="\t"} {print $1,$2,$3,$8,$4}' \
+  > "${OUTPUTS_DIR}/${sample}.counts.bed"
 
 ##remove temporary files
 rm -rf ${temp_dir}/
