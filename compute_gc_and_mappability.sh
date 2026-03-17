@@ -8,30 +8,139 @@
 #this script will take a reference genome (fasta file) and will compute both the gc content and the mappability of specified bins
 #for this to work we need art_illumina, bwa, samtools and bedtools. 
 #art ilumina is in the scDNAseq container.
+set -euo pipefail
+IFS=$'\n\t'
 
-module --force purge
-module load calcua/2024a            # base toolchain (GCC 13.3.0 family)
+# --- preflight --- 
+##set usage helper
+set -euo pipefail
 
-# Load matching builds (all with GCC-13.3.0)
-module load BWA/0.7.18-GCCcore-13.3.0
-module load BEDTools/2.31.1-GCC-13.3.0
-module load SAMtools/1.21-GCC-13.3.0
+usage() {
+  cat <<EOF
+Usage: sbatch $(basename "$0") [options]
 
-#load the container containing art_ilumina
-unset PYTHONPATH
-export PATH="/scratch/antwerpen/205/vsc20542/containers/scDNAseq/bin:$PATH"
+Required:
+  --ref <path>              Reference genome FASTA
+  --output-dir <path>       Output directory
+  --bin-size <int>          Bin size in bp
 
-set -e
-# ======== Parameters ===========
-REF_PATH="/scratch/antwerpen/205/vsc20542/reference_genomes/Leishmania/L_donovani/LdCL/LdCL_original.fasta" # reference genome file path
-OUTPUT_DIR="/scratch/antwerpen/205/vsc20542/projects/BPK081_subclones/"
-BIN_SIZE=1000 # bin size in bp
-SIM_LIBRARY_SIZE=400 # simulated library size (in bp)
-SIM_LIBRARY_SIZE_SE=60 # simulated library size standard error
-SIM_READ_LENGTH=150 # simulated read length (bp)
-SIM_COVERAGE=1 # simulated coverage (per base pair)
-NTHREADS=8 # number of threads to use
+Optional:
+  --lib-size <int>          Library size (default: 400)
+  --lib-size-se <int>       Library size SE (default: 60)
+  --read-length <int>       Read length (default: 150)
+  --coverage <float>        Coverage (default: 1)
+  -h, --help                Show this help
+EOF
+  exit 1
+}
 
+# --- arguments ---
+
+# Defaults
+REF_PATH=""
+OUTPUT_DIR=""
+BIN_SIZE=""
+SIM_LIBRARY_SIZE=400
+SIM_LIBRARY_SIZE_SE=60
+SIM_READ_LENGTH=150
+SIM_COVERAGE=1
+
+# Parse
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --ref)
+      REF_PATH="$2"
+      shift 2
+      ;;
+    --output-dir)
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    --bin-size)
+      BIN_SIZE="$2"
+      shift 2
+      ;;
+    --lib-size)
+      SIM_LIBRARY_SIZE="$2"
+      shift 2
+      ;;
+    --lib-size-se)
+      SIM_LIBRARY_SIZE_SE="$2"
+      shift 2
+      ;;
+    --read-length)
+      SIM_READ_LENGTH="$2"
+      shift 2
+      ;;
+    --coverage)
+      SIM_COVERAGE="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "ERROR: Unknown option '$1'" >&2
+      echo "Use --help for usage information" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Validate
+if [[ -z "$REF_PATH" || -z "$OUTPUT_DIR" || -z "$BIN_SIZE" ]]; then
+  echo "ERROR: --ref, --output-dir, and --bin-size are required" >&2
+  usage
+fi
+
+echo ">>> Parameters:"
+echo "    Reference:    $REF_PATH"
+echo "    Output dir:   $OUTPUT_DIR"
+echo "    Bin size:     $BIN_SIZE bp"
+echo "    Lib size:     $SIM_LIBRARY_SIZE ± $SIM_LIBRARY_SIZE_SE bp"
+echo "    Read length:  $SIM_READ_LENGTH bp"
+echo "    Coverage:     ${SIM_COVERAGE}x"
+echo
+
+# --- get packages ---
+#test if it is running as a slurm array
+if [[ ${SLURM_JOB_ID+x} ]]; then
+  is_slurm=1
+  threads=${SLURM_CPUS_PER_TASK:-1}
+  echo "Script is running as a slurm job"
+    if [[ ${SLURM_ARRAY_TASK_ID}+x ]]; then
+      is_slurm_array=1
+      echo "Script is running as a part of a slurm array"
+      else
+        echo "Script is not running as a part of a slurm array"
+        is_slurm_array=0
+        SLURM_ARRAY_TASK_ID=1 #to make the rest of the code run
+    fi
+  else
+  is_slurm=0
+  SLURM_ARRAY_TASK_ID=1 #to make the rest of the code run
+  threads=$(nproc)
+  threads=$(( threads < 16 ? threads : 16 )) #cap to a maximum of 8 CPU cores
+fi
+
+echo This script will use $threads CPU cores to run.
+
+#if [[ is_slurm == 1 ]]; then
+
+  module --force purge
+  module load calcua/2024a            # base toolchain (GCC 13.3.0 family)
+
+  # Load matching builds (all with GCC-13.3.0)
+  module load BWA/0.7.18-GCCcore-13.3.0
+  module load BEDTools/2.31.1-GCC-13.3.0
+  module load SAMtools/1.21-GCC-13.3.0
+
+  #load the container containing art_ilumina
+  unset PYTHONPATH
+  export PATH="${VSC_SCRATCH}/containers/scDNAseq/bin:$PATH"
+#fi
+
+# --- actual run ---
 # =========== Create artificial Library ====================
 #now we create an artificial fastq file which is used te calculate bin mappability
 wd="$OUTPUT_DIR"
@@ -58,10 +167,10 @@ else
 fi
 
 #map the artificial reads to the reference genome
-bwa mem -t $NTHREADS "$REF_PATH" "$wd/simulated_reads1.fq" "$wd/simulated_reads2.fq" | \
+bwa mem -t $threads "$REF_PATH" "$wd/simulated_reads1.fq" "$wd/simulated_reads2.fq" | \
 samtools fixmate -u -m - - | \
-samtools sort -u -@ $NTHREADS - | \
-samtools markdup -@ $NTHREADS - "$wd/mapped_simulated_reads_sorted.bam"
+samtools sort -u -@ $threads - | \
+samtools markdup -@ $threads - "$wd/mapped_simulated_reads_sorted.bam"
 
 #keep only reads with mapping quality higher than 30
 samtools view -b -q 30 "$wd/mapped_simulated_reads_sorted.bam" > "$wd/mapped_simulated_reads_sorted_filtered.bam"
