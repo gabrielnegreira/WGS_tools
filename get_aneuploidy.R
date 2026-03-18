@@ -1,12 +1,82 @@
 #This is an R script that takes as input a bedgraph file containing binned counts and outputs aneuploidy estimations
-#load Libraries####
-library(tidyverse)
-library(mgcv)
+#set libraries (this vector is then used by the `check_packages()` function)
+packages <- c("tidyverse", "mgcv", "ggalign")
 
 #set parameters
 plot_scale <- 1.8
 
 #custom functions####
+##function to check and automatically install packages if needed####
+# Function to install packages from CRAN, Bioconductor, or fail
+check_packages <- function(package_list) {
+  
+  # Check if BiocManager is installed (needed for Bioconductor)
+  if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    message("Installing BiocManager for Bioconductor package management...")
+    install.packages("BiocManager", repos = "https://cloud.r-project.org")
+  }
+  
+  # Track failed packages
+  failed_packages <- character(0)
+  
+  # Iterate through each package
+  for (pkg in package_list) {
+    
+    # Check if package is already installed
+    if (requireNamespace(pkg, quietly = TRUE)) {
+      message(sprintf("✓ Package '%s' is already installed", pkg))
+      next
+    }
+    
+    message(sprintf("Package '%s' not found. Attempting to install...", pkg))
+    
+    # Try CRAN first
+    message(sprintf("  Trying CRAN for '%s'...", pkg))
+    tryCatch({
+      install.packages(pkg, repos = "https://cloud.r-project.org", quiet = TRUE)
+      
+      # Verify installation
+      if (requireNamespace(pkg, quietly = TRUE)) {
+        message(sprintf("✓ Successfully installed '%s' from CRAN", pkg))
+        next
+      }
+    }, error = function(e) {
+      message(sprintf("  Failed to install '%s' from CRAN", pkg))
+    })
+    
+    # Try Bioconductor if CRAN failed
+    message(sprintf("  Trying Bioconductor for '%s'...", pkg))
+    tryCatch({
+      BiocManager::install(pkg, update = FALSE, ask = FALSE, quiet = TRUE)
+      
+      # Verify installation
+      if (requireNamespace(pkg, quietly = TRUE)) {
+        message(sprintf("✓ Successfully installed '%s' from Bioconductor", pkg))
+        next
+      }
+    }, error = function(e) {
+      message(sprintf("  Failed to install '%s' from Bioconductor", pkg))
+    })
+    
+    # If we reach here, both methods failed
+    failed_packages <- c(failed_packages, pkg)
+  }
+  
+  # Stop with error if any packages failed
+  if (length(failed_packages) > 0) {
+    error_msg <- sprintf(
+      "Failed to install the following package(s): %s\nPlease install them manually.",
+      paste(failed_packages, collapse = ", ")
+    )
+    stop(error_msg)
+  }
+  
+  message("\n✓ All packages are installed, loading them...")
+  for(pkg in package_list){
+    library(pkg, character.only = TRUE)
+    message(sprintf("✓ Loaded '%s'", pkg))
+  }
+}
 ##function to print a usage helper####
 helper <- function(){
   cat("[INFO] Ussage: Rscript get_aneuploidy.R [options]\n")
@@ -119,15 +189,18 @@ correct_gc_bias <- function(x){
   return(x)
 }
 
-#set defaults####
+#actual code####
+##load libraries####
+check_packages(packages)
+##set defaults####
 ploidy <- 2
 
-#get arguments####
-#args <- c("--inputs_dir=inputs/WGS/E4_G3_pTB007/count_files/", "--outputs_dir=outputs/WGS/E4_G3_pTB007") #meant for testing
+##get arguments####
+##args <- c("--inputs_dir=inputs/WGS/E4_G3_pTB007/count_files/", "--outputs_dir=outputs/WGS/E4_G3_pTB007") #meant for testing
 args <- commandArgs(trailingOnly = TRUE)
 validate_args(args)
 
-#load input files#####
+##load input files#####
 file_names <- list.files(inputs_dir, pattern = "*.bed")
 files <- paste0(inputs_dir, "/", file_names)
 cat("Loading a total of", length(files), "files.\n")
@@ -139,11 +212,11 @@ files <- files %>%
 sample_names <- gsub(".counts|.bed", "", file_names)
 names(files) <- sample_names
 
-#now compensate gc_bias####
+##now compensate gc_bias####
 files <- files %>%
   lapply(correct_gc_bias)
 
-#calculate somies####
+##calculate somies####
 combined_data <- files %>%
   bind_rows(.id = "sample") 
 
@@ -155,11 +228,11 @@ somies <- combined_data %>%
 #create output dir
 dir.create(paste0(outputs_dir, "/", "individual_plots"), recursive = TRUE)
 
-#save the outputs####
-##save the list of bed files as an RDS file###
+##save the outputs####
+###save the list of bed files as an RDS file###
 write_rds(files, paste0(outputs_dir, "/bedfile_list.rds"))
 
-##save the somies as a matrix####
+###save the somies as a matrix####
 somies %>%
   pivot_wider(names_from = chromosome, values_from = somy) %>%
   column_to_rownames("sample") %>%
@@ -266,8 +339,8 @@ for(sample in names(files)){
   ggsave(paste0(outputs_dir, "/individual_plots/", sample, "_coverage_plot.png"), final_plot, height = 11.6*plot_scale, width = 8.27*plot_scale, dpi = 600)
 }
 
-#plot grouped plots####
-#plot somies
+##plot grouped plots####
+##plot somies
 heat_col <- c("#001221", "#002342", "#002342", "#014175", "#035ba3", "#00c3ff", "#00ffee", "#33ff00", "#ccff00", "#fffa00","#ffa600", "#D73027", "#A50026", "#541b1b", "#4d0600")
 
 plot_list <- list()
