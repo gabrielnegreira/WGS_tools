@@ -102,7 +102,11 @@ validate_args <- function(x){
       cat("[ERROR]: \`", key, "\` is not a valid argument.\n", sep = "")
       helper()
     }else{
-      value <- parts[2]
+      if(key == "ploidy"){
+        value <- as.numeric(parts[2])
+      }else{
+        value <- parts[2]
+      }
       cat(key, ": ", value, "\n", sep = "")
       assign(key, value, envir = .GlobalEnv) 
     }
